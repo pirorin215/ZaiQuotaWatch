@@ -2,9 +2,12 @@ package com.yoshi.zaiquotawatch
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.graphics.drawable.Icon
 import android.util.Log
 import androidx.wear.watchface.complications.data.ComplicationData
 import androidx.wear.watchface.complications.data.ComplicationType
+import androidx.wear.watchface.complications.data.SmallImage
+import androidx.wear.watchface.complications.data.SmallImageType
 import androidx.wear.watchface.complications.data.PlainComplicationText
 import androidx.wear.watchface.complications.data.ShortTextComplicationData
 import androidx.wear.watchface.complications.datasource.ComplicationRequest
@@ -24,6 +27,8 @@ class ZaiQuotaComplicationService : SuspendingComplicationDataSourceService() {
         val reset = QuotaStore.getReset(this)
         val pct = QuotaStore.getPct(this)
         Log.d("ZaiQuotaComplication", "Retrieved reset='$reset' pct=$pct")
+        val iconRes = if (pct == 100) R.drawable.ic_dot_yellow else R.drawable.ic_dot_blue
+        val icon = SmallImage.Builder(Icon.createWithResource(this, iconRes), SmallImageType.ICON).build()
         val text = when {
             pct !in 0..100 -> "ZAI …"
             reset.isEmpty() || reset == "none" -> "$pct%"
@@ -39,6 +44,7 @@ class ZaiQuotaComplicationService : SuspendingComplicationDataSourceService() {
             text = PlainComplicationText.Builder(text).build(),
             contentDescription = PlainComplicationText.Builder("Z.ai quota $text").build()
             )
+            .setSmallImage(icon)
             .setTapAction(tapIntent)
             .build()
     }
