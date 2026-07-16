@@ -47,11 +47,19 @@ class QuotaNotificationListener : NotificationListenerService() {
 
         val reset = parseField(fullText, KEY_RESET)
         val pct = parseField(fullText, KEY_PCT).toIntOrNull() ?: -1
-        Log.d(TAG, "Parsed: reset='$reset' pct=$pct")
+        val silent = parseField(fullText, KEY_SILENT) == "1"
+        Log.d(TAG, "Parsed: reset='$reset' pct=$pct silent=$silent")
 
         if (reset.isEmpty()) {
             Log.d(TAG, "No reset field in notification, skip")
             return
+        }
+
+        // silent=1 はウォッチ要請由来のデータ通知。ユーザー向けではないので即キャンセル。
+        // （priority=最低・音なしだが、通知シェードにエントリが残るのを防ぐ）
+        if (silent) {
+            cancelNotification(sbn.key)
+            Log.d(TAG, "Cancelled silent notification (watch poll): ${sbn.key}")
         }
 
         scope.launch {
@@ -63,11 +71,16 @@ class QuotaNotificationListener : NotificationListenerService() {
                     dataMap.putLong(KEY_TIMESTAMP, System.currentTimeMillis())
                 }.asPutDataRequest().setUrgent()
                 Wearable.getDataClient(applicationContext).putDataItem(request).await()
-                Log.d(TAG, "Pushed to Watch: reset=$reset pct=$pct")
-                debugToast("✅ ntfy通知→Watch送信\nreset=$reset pct=${pct}%")
+                Log.d(TAG, "Pushed to Watch: reset=$reset pct=$pct silent=$silent")
+                // silent はウォッチ要請由来。ユーザー操作のない自動更新なので Toast 抑制
+                if (!silent) {
+                    debugToast("✅ ntfy通知→Watch送信\nreset=$reset pct=${pct}%")
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to push to Watch", e)
-                debugToast("❌ Watch送信エラー\n${e.message}")
+                if (!silent) {
+                    debugToast("❌ Watch送信エラー\n${e.message}")
+                }
             }
         }
     }
@@ -94,5 +107,6 @@ class QuotaNotificationListener : NotificationListenerService() {
         const val KEY_RESET = "reset"
         const val KEY_PCT = "pct"
         const val KEY_TIMESTAMP = "timestamp"
+        const val KEY_SILENT = "silent"
     }
 }
