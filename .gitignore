@@ -20,4 +20,7 @@ local.properties
 .DS_Store
 
 # Kotlin
-.kotlin/sessions/
+.kotlin/
+
+# ZCode
+.zcode/
