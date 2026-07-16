@@ -33,6 +33,7 @@ class RefreshTriggerReceiver : WearableListenerService() {
     override fun onMessageReceived(event: MessageEvent) {
         if (event.path != TRIGGER_PATH) return
         Log.d(TAG, "Received refresh trigger from ${event.sourceNodeId}")
+        DebugLog.append(applicationContext, "①Watch要求", "from ${event.sourceNodeId.takeLast(8)}")
 
         scope.launch {
             postToNtfy()
@@ -66,11 +67,14 @@ class RefreshTriggerReceiver : WearableListenerService() {
             val code = conn.responseCode
             if (code in 200..299) {
                 Log.d(TAG, "Posted refresh request to ntfy watchpoll topic (HTTP $code)")
+                DebugLog.append(applicationContext, "②ntfy送信", "OK HTTP $code")
             } else {
                 Log.w(TAG, "ntfy POST failed: HTTP $code")
+                DebugLog.append(applicationContext, "②ntfy送信", "❌ HTTP $code")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to post refresh request to ntfy", e)
+            DebugLog.append(applicationContext, "②ntfy送信", "❌ ${e.javaClass.simpleName}: ${e.message}")
         } finally {
             conn?.disconnect()
         }

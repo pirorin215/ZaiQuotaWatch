@@ -50,11 +50,20 @@ class MainActivity : Activity() {
             setOnClickListener { refreshDisplay() }
         }
 
+        val clearLogButton = Button(this).apply {
+            text = "ログを消去"
+            setOnClickListener {
+                DebugLog.clear(this@MainActivity)
+                refreshDisplay()
+            }
+        }
+
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(statusText)
             addView(permButton)
             addView(reloadButton)
+            addView(clearLogButton)
         }
         setContentView(layout)
         scope.launch {
@@ -64,6 +73,9 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // フォアグラウンド化で保留キューが解除されるケースを後から追えるよう、
+        // 起動マーカーを記録。この直後に③④が続いていればバックグラウンド遅延の証拠。
+        DebugLog.append(this, "📱アプリ起動", "onResume")
         refreshDisplay()
     }
 
@@ -77,6 +89,7 @@ class MainActivity : Activity() {
         val pct = QuotaStore.getPct(this)
         val updated = QuotaStore.getUpdatedTime(this)
         val updatedStr = if (updated > 0) timeFmt.format(Date(updated)) else "未取得"
+        val logs = DebugLog.getRecent(this)
 
         statusText.text = buildString {
             append("ZAI Quota Relay\n\n")
@@ -90,7 +103,15 @@ class MainActivity : Activity() {
             append("  ntfyアプリ通知 →\n")
             append("  NotificationListener →\n")
             append("  DataLayer → Watch\n\n")
-            append("Mac から ntfy 送信で\nWatch が数秒で更新されます")
+            append("【ログ】\n")
+            if (logs.isEmpty()) {
+                append("  (なし)\n")
+            } else {
+                logs.forEach { e ->
+                    append("  ${timeFmt.format(Date(e.time))} ${e.tag} ${e.message}\n")
+                }
+            }
+            append("\nMac から ntfy 送信で\nWatch が数秒で更新されます")
         }
     }
 

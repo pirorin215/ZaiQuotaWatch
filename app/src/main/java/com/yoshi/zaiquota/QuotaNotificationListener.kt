@@ -49,6 +49,7 @@ class QuotaNotificationListener : NotificationListenerService() {
         val pct = parseField(fullText, KEY_PCT).toIntOrNull() ?: -1
         val silent = parseField(fullText, KEY_SILENT) == "1"
         Log.d(TAG, "Parsed: reset='$reset' pct=$pct silent=$silent")
+        DebugLog.append(applicationContext, "③ntfy受信", "pct=${pct}% reset=${reset}${if (silent) " [silent]" else ""}")
 
         if (reset.isEmpty()) {
             Log.d(TAG, "No reset field in notification, skip")
@@ -72,12 +73,14 @@ class QuotaNotificationListener : NotificationListenerService() {
                 }.asPutDataRequest().setUrgent()
                 Wearable.getDataClient(applicationContext).putDataItem(request).await()
                 Log.d(TAG, "Pushed to Watch: reset=$reset pct=$pct silent=$silent")
+                DebugLog.append(applicationContext, "④Watch送信", "✅ pct=${pct}%${if (silent) " [silent]" else ""}")
                 // silent はウォッチ要請由来。ユーザー操作のない自動更新なので Toast 抑制
                 if (!silent) {
                     debugToast("✅ ntfy通知→Watch送信\nreset=$reset pct=${pct}%")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to push to Watch", e)
+                DebugLog.append(applicationContext, "④Watch送信", "❌ ${e.javaClass.simpleName}: ${e.message}")
                 if (!silent) {
                     debugToast("❌ Watch送信エラー\n${e.message}")
                 }
