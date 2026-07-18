@@ -9,6 +9,9 @@ import android.text.TextUtils
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -18,6 +21,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 /**
  * ランチャー Activity。
@@ -29,6 +33,10 @@ class MainActivity : Activity() {
     private lateinit var statusText: TextView
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val timeFmt = SimpleDateFormat("MM-dd HH:mm:ss", Locale.JAPAN)
+
+    private companion object {
+        const val HEARTBEAT_WORK_NAME = "listener_heartbeat"
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,6 +77,23 @@ class MainActivity : Activity() {
         scope.launch {
             QuotaStore.flow.collect { refreshDisplay() }
         }
+        scheduleHeartbeat()
+    }
+
+    /**
+     * NotificationListenerService の休眠対策。
+     * 15分周期の WorkManager で requestRebind を呼びリスナーを再活性化する。
+     * Unique Periodic Work で多重登録を防ぐ（既存があれば保持）。
+     */
+    private fun scheduleHeartbeat() {
+        val request = PeriodicWorkRequestBuilder<ListenerHeartbeatWorker>(
+            15, TimeUnit.MINUTES
+        ).build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            HEARTBEAT_WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            request
+        )
     }
 
     override fun onResume() {

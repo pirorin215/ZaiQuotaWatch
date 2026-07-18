@@ -37,5 +37,6 @@ android {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.play.services.wearable)
+    implementation(libs.androidx.work.runtime.ktx)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 }

@@ -36,6 +36,11 @@ object DebugLog {
     fun getRecent(context: Context): List<Entry> =
         readAll(context).reversed()
 
+    /** 指定 tag の最新エントリのタイムスタンプを取得（無ければ 0）。 */
+    @Synchronized
+    fun getLastTime(context: Context, tag: String): Long =
+        readAll(context).filter { it.tag == tag }.maxOfOrNull { it.time } ?: 0L
+
     @Synchronized
     fun clear(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
