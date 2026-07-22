@@ -1,7 +1,10 @@
 package com.yoshi.zaiquota
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
@@ -9,6 +12,7 @@ import android.text.TextUtils
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -66,12 +70,30 @@ class MainActivity : Activity() {
             }
         }
 
+        val copyLogButton = Button(this).apply {
+            text = "ログをコピー"
+            setOnClickListener {
+                val logs = DebugLog.getRecent(this@MainActivity)
+                val text = if (logs.isEmpty()) {
+                    "(ログなし)"
+                } else {
+                    logs.joinToString("\n") { e ->
+                        "${timeFmt.format(Date(e.time))} ${e.tag} ${e.message}"
+                    }
+                }
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("ZaiQuotaWatch ログ", text))
+                Toast.makeText(this@MainActivity, "ログをコピーしました（${logs.size}件）", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(statusText)
             addView(permButton)
             addView(reloadButton)
             addView(clearLogButton)
+            addView(copyLogButton)
         }
         setContentView(layout)
         scope.launch {
