@@ -40,6 +40,7 @@ class MainActivity : Activity() {
 
     private companion object {
         const val HEARTBEAT_WORK_NAME = "listener_heartbeat"
+        const val POLL_WORK_NAME = "quota_poll_fallback"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -100,6 +101,7 @@ class MainActivity : Activity() {
             QuotaStore.flow.collect { refreshDisplay() }
         }
         scheduleHeartbeat()
+        schedulePollFallback()
     }
 
     /**
@@ -113,6 +115,26 @@ class MainActivity : Activity() {
         ).build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             HEARTBEAT_WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            request
+        )
+    }
+
+    /**
+     * NotificationListener の取りこぼしを補うフォールバック poll。
+     * 5分周期で ntfy サーバーへ直接 poll し、リスナー経由で届かなかった
+     * メッセージを回収する。Mac 側 omp_usage.300s.sh の送信周期と同じ5分。
+     *
+     * 初回はすぐ実行されるよう initialDelay しない（cursor が "all" なので
+     * 直近の全メッセージを読み、以降は since カーソルで差分だけ処理する）。
+     * 既存スケジュールがあれば KEEP で維持（多重登録回避）。
+     */
+    private fun schedulePollFallback() {
+        val request = PeriodicWorkRequestBuilder<QuotaPollWorker>(
+            5, TimeUnit.MINUTES
+        ).build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            POLL_WORK_NAME,
             ExistingPeriodicWorkPolicy.KEEP,
             request
         )

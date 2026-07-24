@@ -1,20 +1,9 @@
 package com.yoshi.zaiquota
 
 import android.app.Notification
-import android.os.Handler
-import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
-import android.widget.Toast
-import com.google.android.gms.wearable.PutDataMapRequest
-import com.google.android.gms.wearable.Wearable
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 
 /**
  * ntfy 公式アプリの通知を検知 → reset/pct をパース → DataLayer で Watch へ転送。
@@ -28,10 +17,13 @@ import kotlinx.coroutines.tasks.await
  *
  * 従来の 60分ポーリング (QuotaFetchWorker) に代わるリアルタイム経路。
  * 動作には「通知へのアクセス」権限の許可が必須 (MainActivity で案内)。
+ *
+ * NotificationListener の取りこぼし（ntfy アプリの通知 group 化・update 後の
+ * onNotificationPosted 不発等）を補うため、QuotaPollWorker が5分周期で
+ * ntfy サーバーへ直接 poll し、本リスナーと同じ QuotaRelay.relayToWatch 経路へ
+ * データを流すフォールバック経路も併用する。
  */
 class QuotaNotificationListener : NotificationListenerService() {
-
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         val n = sbn ?: return
@@ -45,71 +37,23 @@ class QuotaNotificationListener : NotificationListenerService() {
         val fullText = listOf(title, text, bigText).joinToString(" ")
         Log.d(TAG, "ntfy notification: title='$title' text='$text' big='$bigText'")
 
-        val reset = parseField(fullText, KEY_RESET)
-        val pct = parseField(fullText, KEY_PCT).toIntOrNull() ?: -1
-        val silent = parseField(fullText, KEY_SILENT) == "1"
-        Log.d(TAG, "Parsed: reset='$reset' pct=$pct silent=$silent")
-        DebugLog.append(applicationContext, "③ntfy受信", "pct=${pct}% reset=${reset}${if (silent) " [silent]" else ""}")
-
-        if (reset.isEmpty()) {
-            Log.d(TAG, "No reset field in notification, skip")
-            return
-        }
-
         // silent=1 はウォッチ要請由来のデータ通知。ユーザー向けではないので即キャンセル。
         // （priority=最低・音なしだが、通知シェードにエントリが残るのを防ぐ）
+        // ※ パース前に判定し、通知シェードを早めに綺麗にする
+        val silent = QuotaRelay.parseField(fullText, QuotaRelay.KEY_SILENT) == "1"
         if (silent) {
             cancelNotification(sbn.key)
             Log.d(TAG, "Cancelled silent notification (watch poll): ${sbn.key}")
         }
 
-        scope.launch {
-            try {
-                QuotaStore.save(applicationContext, reset, pct)
-                val request = PutDataMapRequest.create(DATA_PATH).apply {
-                    dataMap.putString(KEY_RESET, reset)
-                    dataMap.putInt(KEY_PCT, pct)
-                    dataMap.putLong(KEY_TIMESTAMP, System.currentTimeMillis())
-                }.asPutDataRequest().setUrgent()
-                Wearable.getDataClient(applicationContext).putDataItem(request).await()
-                Log.d(TAG, "Pushed to Watch: reset=$reset pct=$pct silent=$silent")
-                DebugLog.append(applicationContext, "④Watch送信", "✅ pct=${pct}%${if (silent) " [silent]" else ""}")
-                // silent はウォッチ要請由来。ユーザー操作のない自動更新なので Toast 抑制
-                if (!silent) {
-                    debugToast("✅ ntfy通知→Watch送信\nreset=$reset pct=${pct}%")
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to push to Watch", e)
-                DebugLog.append(applicationContext, "④Watch送信", "❌ ${e.javaClass.simpleName}: ${e.message}")
-                if (!silent) {
-                    debugToast("❌ Watch送信エラー\n${e.message}")
-                }
-            }
-        }
-    }
-
-    override fun onDestroy() {
-        scope.cancel()
-        super.onDestroy()
-    }
-
-    private fun parseField(message: String, field: String): String =
-        Regex("$field=([^\\s]+)").find(message)?.groupValues?.getOrNull(1) ?: ""
-
-    /** onNotificationPosted はメインスレッド呼出だが、Toast はそのまま出せる。 */
-    private fun debugToast(message: String) {
-        Handler(Looper.getMainLooper()).post {
-            Toast.makeText(applicationContext, message, Toast.LENGTH_LONG).show()
-        }
+        // 共通経路でパース → DataLayer 転送。
+        // 通知の group 化で複数メッセージが bigText に連結されている場合も、
+        // 末尾の最新フィールドが採用される（parseField は最後マッチを返すため）。
+        QuotaRelay.parseAndRelay(applicationContext, fullText, QuotaRelay.TAG_NTFY_RECEIVED)
     }
 
     companion object {
         private const val TAG = "QuotaNtfyListener"
         private const val NTFY_PKG_PREFIX = "io.heckel.ntfy"
-        const val DATA_PATH = "/zai_quota"
-        const val KEY_RESET = "reset"
-        const val KEY_PCT = "pct"
-        const val KEY_TIMESTAMP = "timestamp"
-        const val KEY_SILENT = "silent"
     }
 }

@@ -12,9 +12,13 @@ import androidx.work.WorkerParameters
  * 背景: Android 14+ で NotificationListenerService が App Standby により
  * バックグラウンドでランダムに停止する既知の問題がある。ログから34分間の停止を観測済み。
  *
- * 15分周期で起動し、最後の「③ntfy受信」から20分以上経過していたら
+ * 15分周期で起動し、最後の「③ntfy受信」or「③poll受信」から20分以上経過していたら
  * （＝Macは5分周期で送るので受信途絶＝リスナー休眠確実）
  * requestRebind() でシステムへ再バインドを要求する。
+ *
+ * poll受信（QuotaPollWorker のフォールバック）も「データは届いている」証拠なので
+ * これを含めて判定する。リスナー経路が死んで poll 経路だけで受けている間も
+ * rebind を試み続ける（poll はあくまで補完で、リアルタイム性はリスナー経路が主役）。
  */
 class ListenerHeartbeatWorker(
     appContext: android.content.Context,
@@ -22,7 +26,10 @@ class ListenerHeartbeatWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        val lastReceived = DebugLog.getLastTime(applicationContext, TAG_NTFY_RECEIVED)
+        // リスナー経路（③ntfy受信）と poll フォールバック（③poll受信）の新しい方を採用
+        val lastListener = DebugLog.getLastTime(applicationContext, TAG_NTFY_RECEIVED)
+        val lastPoll = DebugLog.getLastTime(applicationContext, TAG_POLL_RECEIVED)
+        val lastReceived = maxOf(lastListener, lastPoll)
         val now = System.currentTimeMillis()
         val silentForMin = if (lastReceived > 0) (now - lastReceived) / 60_000 else Long.MAX_VALUE
 
@@ -44,7 +51,9 @@ class ListenerHeartbeatWorker(
 
     companion object {
         private const val TAG = "HeartbeatWorker"
-        private const val TAG_NTFY_RECEIVED = "③ntfy受信"
+        // QuotaRelay で定義したログタグと同期
+        private const val TAG_NTFY_RECEIVED = QuotaRelay.TAG_NTFY_RECEIVED
+        private const val TAG_POLL_RECEIVED = QuotaRelay.TAG_POLL_RECEIVED
         private const val TAG_HEARTBEAT = "⑤ハートビート"
         // Macは5分周期で送信するため、20分以上受信がない＝リスナー休眠確実
         private const val STALE_THRESHOLD_MIN = 20L
