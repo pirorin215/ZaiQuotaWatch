@@ -40,6 +40,8 @@ class QuotaRefreshActivity : Activity() {
     }
 
     private lateinit var infoText: TextView
+    private lateinit var gaugeBar: ProgressBar
+    private lateinit var gaugeLabel: TextView
     private lateinit var statusText: TextView
     private lateinit var refreshButton: Button
     private lateinit var pullIndicator: LinearLayout
@@ -70,6 +72,27 @@ class QuotaRefreshActivity : Activity() {
             setLineSpacing(4f, 1f)
         }
 
+        // 残量/解除までの時間を示すゲージ（横バー）。
+        // 通常時: 残量 = 100 - pct（満タン=余裕、空=枯渇間近）
+        // 枯渇時: 解除までの分数 / 300（5h）。残り時間が多いほど満タン。
+        // progressBarStyleHorizontal を明示指定しないと、テーマ既定の
+        // indeterminate（スピナー）スタイルになり progress 値が反映されない。
+        gaugeBar = ProgressBar(
+            this,
+            null,
+            android.R.attr.progressBarStyleHorizontal
+        ).apply {
+            max = 100
+            progress = 0
+            isIndeterminate = false
+        }
+        gaugeLabel = TextView(this).apply {
+            textSize = 11f
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(0, (4 * resources.displayMetrics.density).toInt(), 0, 0)
+            alpha = 0.85f
+        }
+
         refreshButton = Button(this).apply {
             text = "🔄 更新"
             setOnClickListener { refresh() }
@@ -86,11 +109,22 @@ class QuotaRefreshActivity : Activity() {
 
         // 中央寄せ: gravity=CENTER で縦方向も画面中央に配置されるため、
         // 更新ボタンが概ね画面どまんなかに来る。
+        val barHeight = (14 * resources.displayMetrics.density).toInt()
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setPadding(hPad, 0, hPad, 0)
             addView(infoText)
+            // ゲージ: 幅は親に合わせ、高さを明示（ContentLinearLayout のデフォルト
+            // LayoutParams で WRAP_CONTENT になるとバーが潰れるのを防ぐ）
+            addView(
+                gaugeBar,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    barHeight
+                )
+            )
+            addView(gaugeLabel)
             addView(refreshButton)
             addView(statusText)
         }
@@ -204,6 +238,40 @@ class QuotaRefreshActivity : Activity() {
             append("reset: ${if (reset.isEmpty()) "(空)" else reset}\n")
             append("pct: $pct%\n")
             append("受信: $updatedStr")
+        }
+
+        renderGauge()
+    }
+
+    /**
+     * ゲージ（横バー）とラベルを描画。値の計算は QuotaStore.gaugeState に統一。
+     * Complication と同じ使用率方向（満タン=枯渇間近／解除間近）で表示する。
+     *  - 通常時: value = pct、ラベル "使用率 N%"
+     *  - 枯渇時: value = 100 - 残り時間/5h、ラベル "枯渇中 解除まで H時間M分"
+     *  - 未取得: 0%、ラベル "—"
+     */
+    private fun renderGauge() {
+        val state = QuotaStore.gaugeState(this)
+        when {
+            state.value < 0 -> {
+                gaugeBar.progress = 0
+                gaugeLabel.text = "—"
+            }
+            state.isDepleted -> {
+                gaugeBar.progress = state.value
+                val minToReset = QuotaStore.minutesUntilReset(QuotaStore.getReset(this)) ?: 0
+                val h = minToReset / 60
+                val m = minToReset % 60
+                gaugeLabel.text = buildString {
+                    append("枯渇中 解除まで ")
+                    if (h > 0) append("${h}時間")
+                    append("${m}分")
+                }
+            }
+            else -> {
+                gaugeBar.progress = state.value
+                gaugeLabel.text = "使用率 ${state.value}%"
+            }
         }
     }
 
