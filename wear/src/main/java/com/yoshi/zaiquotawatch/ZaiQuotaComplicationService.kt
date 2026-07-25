@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.wear.watchface.complications.data.ColorRamp
 import androidx.wear.watchface.complications.data.ComplicationData
 import androidx.wear.watchface.complications.data.ComplicationType
+import androidx.wear.watchface.complications.data.LongTextComplicationData
 import androidx.wear.watchface.complications.data.PlainComplicationText
 import androidx.wear.watchface.complications.data.RangedValueComplicationData
 import androidx.wear.watchface.complications.data.ShortTextComplicationData
@@ -58,12 +59,34 @@ class ZaiQuotaComplicationService : SuspendingComplicationDataSourceService() {
                     contentDescription = PlainComplicationText.Builder(contentDesc(state, resetText)).build()
                 )
                     .setText(PlainComplicationText.Builder(resetText).build())
-                    .setColorRamp(RAMP)
+                    // 枯渇時はリング全体を赤一色にし、Watchface 実装によっては
+                    // テキストも赤く描画される（ColorRamp に合わせてテキスト色を変える
+                    // Watchface があるため）。通常時は青→黄→赤のグラデーション。
+                    .setColorRamp(if (state.isDepleted) RAMP_RED else RAMP)
+                    // 通常時は TYPE_PERCENTAGE を指定し、Watchface に「バッテリー風の
+                    // リング＋大きい数字」レイアウト（Pixel Watch 標準と同じ描画）を選ばせる。
+                    // 枯渇時は value が「残り時間/5h」でパーセント意味論に合わないため
+                    // TYPE_UNDEFINED のまま（従来のリング＋テキスト）にする。
+                    .setValueType(
+                        if (state.isDepleted) RangedValueComplicationData.TYPE_UNDEFINED
+                        else RangedValueComplicationData.TYPE_PERCENTAGE
+                    )
                     .setTapAction(tapIntent)
                     .build()
             }
             ComplicationType.SHORT_TEXT -> {
                 ShortTextComplicationData.Builder(
+                    text = PlainComplicationText.Builder(resetText).build(),
+                    contentDescription = PlainComplicationText.Builder(contentDesc(state, resetText)).build()
+                )
+                    .setSmallImage(smallImage(state))
+                    .setTapAction(tapIntent)
+                    .build()
+            }
+            ComplicationType.LONG_TEXT -> {
+                // 大きなテキスト領域を持つスロット用。ゲージリングは描かれないが、
+                // 時刻だけを大きく表示したい場合に選んでもらうための型。
+                LongTextComplicationData.Builder(
                     text = PlainComplicationText.Builder(resetText).build(),
                     contentDescription = PlainComplicationText.Builder(contentDesc(state, resetText)).build()
                 )
@@ -80,21 +103,35 @@ class ZaiQuotaComplicationService : SuspendingComplicationDataSourceService() {
             value = 80f,
             min = 0f,
             max = 100f,
-            contentDescription = PlainComplicationText.Builder("ZAI quota reset 01:19").build()
+            contentDescription = PlainComplicationText.Builder("ZAI quota reset 1:19").build()
         )
-            .setText(PlainComplicationText.Builder("01:19").build())
+            .setText(PlainComplicationText.Builder("1:19").build())
             .setColorRamp(RAMP)
+            .setValueType(RangedValueComplicationData.TYPE_PERCENTAGE)
             .build()
         ComplicationType.SHORT_TEXT -> ShortTextComplicationData.Builder(
-            text = PlainComplicationText.Builder("01:19").build(),
+            text = PlainComplicationText.Builder("1:19").build(),
+            contentDescription = PlainComplicationText.Builder("ZAI quota reset preview").build()
+        ).build()
+        ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(
+            text = PlainComplicationText.Builder("1:19").build(),
             contentDescription = PlainComplicationText.Builder("ZAI quota reset preview").build()
         ).build()
         else -> null
     }
 
-    /** リセット時刻表示文字列。空/none/未取得は --:-- 。 */
-    private fun resetDisplay(reset: String): String =
-        if (reset.isBlank() || reset.equals("none", ignoreCase = true)) "--:--" else reset
+    /**
+     * リセット時刻表示文字列。空/none/未取得は --:--。
+     * 先頭ゼロは抜いて文字数を削り、Complication スロット内で相対的に大きく
+     * 描かれるようにする（例: "01:19" → "1:19", "09:05" → "9:05"）。
+     */
+    private fun resetDisplay(reset: String): String {
+        if (reset.isBlank() || reset.equals("none", ignoreCase = true)) return "--:--"
+        val parts = reset.split(":")
+        if (parts.size != 2) return reset
+        val h = parts[0].toIntOrNull()?.toString() ?: parts[0]
+        return "$h:${parts[1]}"
+    }
 
     private fun contentDesc(state: QuotaStore.GaugeState, resetText: String): String =
         if (state.isDepleted) "ZAI quota exhausted, reset $resetText"
@@ -114,5 +151,7 @@ class ZaiQuotaComplicationService : SuspendingComplicationDataSourceService() {
             intArrayOf(0xFF4285F4.toInt(), 0xFFFBBC04.toInt(), 0xFFEA4335.toInt()),
             interpolated = true
         )
+        // 枯渇時専用: リング全体を赤一色にし、Watchface によってはテキストも赤く描画。
+        val RAMP_RED = ColorRamp(intArrayOf(0xFFEA4335.toInt()), interpolated = false)
     }
 }
