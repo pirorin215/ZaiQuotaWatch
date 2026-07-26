@@ -61,27 +61,30 @@ object QuotaRelay {
         Log.d(TAG, "Parsed [$sourceTag]: reset='$normalizedReset' pct=$pct silent=$silent")
         DebugLog.append(context, sourceTag, "pct=${pct}% reset=${normalizedReset}${if (silent) " [silent]" else ""}")
 
-        // 両方無効なら送らない（Mac 側の空メッセージ/パース失敗等）
-        if (normalizedReset.isEmpty() && pct < 0) {
-            Log.d(TAG, "No valid fields in message, skip")
-            return
-        }
-
+        // 受け手（Watch）側でガードすると「送っているのに届かない」gap ができるため、
+        // 有効性判断は Mac 側 omp_usage スクリプトに一任し、Phone/Watch は素通しする。
+        // Mac から来るメッセージは必ず意味のあるペイロード（pct= 付き）なので、
+        // ここでの追加 skip は持たない。
         relayToWatch(context, normalizedReset, pct, silent)
     }
 
     /**
      * QuotaStore へ保存し DataLayer へ urgent push する。
-     * pct=-1（取得失敗）のときは前回値を保持するため保存しない（Watch UI が混乱するのを防ぐ）。
+     *
+     * 有効性ガードは持たない: 受け取った値を Watch へそのまま送る。
+     * Phone 側 QuotaStore.save も pct=-1 を含めて常に保存する（Watch と同じく
+     * 受け手でのガードを廃止）。前回値保持の意図だったが、結局「送ったのに保存されない」
+     * 非対称性を生むだけだった。Mac 側で意味のない値は送らない設計なので信頼する。
      */
     fun relayToWatch(context: Context, reset: String, pct: Int, silent: Boolean) {
         scope.launch {
             try {
-                if (pct >= 0) {
-                    QuotaStore.save(context, if (reset.isEmpty()) "" else reset, pct)
-                }
+                QuotaStore.save(context, if (reset.isEmpty()) "" else reset, pct)
+                // reset は空でも常に送る。Watch 側は --:-- 扱いで描画する。
+                // KEY_RESET を省略すると Watch が前回値を保持してしまうため、
+                // 「reset 無し」状態を明示伝達するためにも必ず put する。
                 val request = PutDataMapRequest.create(DATA_PATH).apply {
-                    if (reset.isNotEmpty()) dataMap.putString(KEY_RESET, reset)
+                    dataMap.putString(KEY_RESET, if (reset.isEmpty()) "" else reset)
                     dataMap.putInt(KEY_PCT, pct)
                     dataMap.putLong(KEY_TIMESTAMP, System.currentTimeMillis())
                 }.asPutDataRequest().setUrgent()
@@ -89,7 +92,7 @@ object QuotaRelay {
                 Log.d(TAG, "Pushed to Watch: reset=$reset pct=$pct silent=$silent")
                 DebugLog.append(context, TAG_WATCH_PUSHED, "✅ pct=${pct}%${if (silent) " [silent]" else ""}")
                 // silent はウォッチ要請由来。ユーザー操作のない自動更新なので Toast 抑制
-                if (!silent && pct >= 0) {
+                if (!silent) {
                     debugToast(context, "✅ ntfy→Watch送信\nreset=$reset pct=${pct}%")
                 }
             } catch (e: Exception) {
