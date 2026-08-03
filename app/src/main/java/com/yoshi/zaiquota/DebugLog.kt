@@ -5,15 +5,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * デバッグ用の簡易ログリングバッファ。SharedPreferences に永続化する。
- * プロセスをまたいで Service → MainActivity 間で共有し、Pull 経路の各段階の
- * 到達状況を画面で確認できるようにする。
- *
- * 用途: ウォッチからの更新要求が「どこまで届いているか」を切り分ける。
- *   ① Watch要求受信  → RefreshTriggerReceiver
- *   ② ntfy POST結果  → RefreshTriggerReceiver
- *   ③ ntfy通知検知   → QuotaNotificationListener
- *   ④ Watch送信完了  → QuotaNotificationListener
+ * デバッグ用の簡易ログリングバッファ（SharedPreferences 永続化）。
+ * プロセスをまたいで Service → MainActivity 間で共有し、Pull 経路の各段階の到達状況を切り分ける。
+ *   ① Watch要求受信 / ② ntfy POST結果 / ③ ntfy通知検知 / ④ Watch送信完了
  */
 object DebugLog {
     private const val PREFS = "zai_quota_debug"
@@ -21,6 +15,9 @@ object DebugLog {
     private const val MAX_ENTRIES = 20
 
     data class Entry(val time: Long, val tag: String, val message: String)
+
+    private fun Context.prefs() =
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     /** 1行追加する（MAX超は最古を破棄）。 */
     @Synchronized
@@ -33,8 +30,7 @@ object DebugLog {
 
     /** 最新順で全件取得（UI 表示用）。 */
     @Synchronized
-    fun getRecent(context: Context): List<Entry> =
-        readAll(context).reversed()
+    fun getRecent(context: Context): List<Entry> = readAll(context).reversed()
 
     /** 指定 tag の最新エントリのタイムスタンプを取得（無ければ 0）。 */
     @Synchronized
@@ -43,12 +39,11 @@ object DebugLog {
 
     @Synchronized
     fun clear(context: Context) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+        context.prefs().edit().clear().apply()
     }
 
     private fun readAll(context: Context): List<Entry> {
-        val json = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_ENTRIES, null) ?: return emptyList()
+        val json = context.prefs().getString(KEY_ENTRIES, null) ?: return emptyList()
         return runCatching {
             JSONArray(json).let { arr ->
                 (0 until arr.length()).map { i ->
@@ -64,8 +59,6 @@ object DebugLog {
         entries.forEach { e ->
             arr.put(JSONObject().put("time", e.time).put("tag", e.tag).put("message", e.message))
         }
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(KEY_ENTRIES, arr.toString())
-            .apply()
+        context.prefs().edit().putString(KEY_ENTRIES, arr.toString()).apply()
     }
 }

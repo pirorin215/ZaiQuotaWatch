@@ -13,11 +13,14 @@ object QuotaStore {
     private const val KEY_PCT = "pct"     // 0-100, -1=未取得
     private const val KEY_UPDATED = "updated"
 
+    private fun Context.prefs() =
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
     /** 枯渇解除までの最大待ち時間（5時間=300分）。ゲージ満タン基準。 */
     const val MAX_RESET_MINUTES = 5 * 60
 
     fun save(context: Context, reset: String, pct: Int) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        context.prefs().edit()
             .putString(KEY_RESET, reset)
             .putInt(KEY_PCT, pct)
             .putLong(KEY_UPDATED, System.currentTimeMillis())
@@ -25,16 +28,13 @@ object QuotaStore {
     }
 
     fun getReset(context: Context): String =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_RESET, "") ?: ""
+        context.prefs().getString(KEY_RESET, "") ?: ""
 
     fun getPct(context: Context): Int =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getInt(KEY_PCT, -1)
+        context.prefs().getInt(KEY_PCT, -1)
 
     fun getUpdatedTime(context: Context): Long =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getLong(KEY_UPDATED, 0L)
+        context.prefs().getLong(KEY_UPDATED, 0L)
 
     /**
      * reset が "HH:mm" 形式なら現在時刻からの残り分数（0以上・日跨ぎ考慮）を返す。

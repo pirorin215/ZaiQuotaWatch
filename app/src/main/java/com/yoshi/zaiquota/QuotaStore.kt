@@ -13,6 +13,9 @@ object QuotaStore {
     private const val KEY_PCT = "pct"
     private const val KEY_UPDATED = "updated"
 
+    private fun Context.prefs() =
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
     /** 直近の保存値。NotificationListener が save すると即座に更新される。MainActivity が collect して画面更新。 */
     val flow = MutableStateFlow<Snapshot?>(null)
 
@@ -20,7 +23,7 @@ object QuotaStore {
 
     fun save(context: Context, reset: String, pct: Int) {
         val now = System.currentTimeMillis()
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        context.prefs().edit()
             .putString(KEY_RESET, reset)
             .putInt(KEY_PCT, pct)
             .putLong(KEY_UPDATED, now)
@@ -29,14 +32,11 @@ object QuotaStore {
     }
 
     fun getReset(context: Context): String =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_RESET, "") ?: ""
+        context.prefs().getString(KEY_RESET, "") ?: ""
 
     fun getPct(context: Context): Int =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getInt(KEY_PCT, -1)
+        context.prefs().getInt(KEY_PCT, -1)
 
     fun getUpdatedTime(context: Context): Long =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getLong(KEY_UPDATED, 0L)
+        context.prefs().getLong(KEY_UPDATED, 0L)
 }

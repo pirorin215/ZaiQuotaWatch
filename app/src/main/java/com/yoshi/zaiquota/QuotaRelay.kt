@@ -15,18 +15,9 @@ import kotlinx.coroutines.tasks.await
 
 /**
  * クォータデータ（reset/pct）をパースして Watch へ転送する共通経路。
- *
- * QuotaNotificationListener（ntfy 公式アプリ通知経由）と
- * QuotaPollWorker（ntfy サーバー直接 poll 経由）の両方から利用する。
- * どちらの経路で取得したデータも最終的にここを通って DataLayer へ送られる。
- *
- * メッセージフォーマット（Mac omp_usage.300s.sh が送信）:
- *   "reset=01:19 pct=18 silent=1"     ← ウォッチ要求由来の silent ミラー
- *   "reset=01:19 pct=100"             ← 状態機械による枯渇通知
- *   "pct=5 prev=100 reset=01:19"      ← 回復通知（prev 付き）
+ * QuotaNotificationListener（ntfy 通知経由）と QuotaPollWorker（ntfy poll 経由）の両方から利用する。
  *
  * silent フラグは通知シェードを汚さないよう Toast を抑制する目的のみ。
- * reset が空で pct も無効（-1）の場合はスキップ（無意味なデータ送信を避ける）。
  */
 object QuotaRelay {
 
@@ -62,38 +53,33 @@ object QuotaRelay {
         DebugLog.append(context, sourceTag, "pct=${pct}% reset=${normalizedReset}${if (silent) " [silent]" else ""}")
 
         // 受け手（Watch）側でガードすると「送っているのに届かない」gap ができるため、
-        // 有効性判断は Mac 側 omp_usage スクリプトに一任し、Phone/Watch は素通しする。
-        // Mac から来るメッセージは必ず意味のあるペイロード（pct= 付き）なので、
-        // ここでの追加 skip は持たない。
+        // 有効性判断は Mac 側 omp_usage スクリプトに一任し Phone/Watch は素通しする。
         relayToWatch(context, normalizedReset, pct, silent)
     }
 
     /**
      * QuotaStore へ保存し DataLayer へ urgent push する。
-     *
-     * 有効性ガードは持たない: 受け取った値を Watch へそのまま送る。
-     * Phone 側 QuotaStore.save も pct=-1 を含めて常に保存する（Watch と同じく
-     * 受け手でのガードを廃止）。前回値保持の意図だったが、結局「送ったのに保存されない」
-     * 非対称性を生むだけだった。Mac 側で意味のない値は送らない設計なので信頼する。
+     * 有効性ガードは持たない: 受け取った値をそのまま送る（Mac 側が意味のある値のみ送る設計なので信頼）。
      */
     fun relayToWatch(context: Context, reset: String, pct: Int, silent: Boolean) {
+        // 呼び出し元で正規化済みを前提とするが、直接呼び出しの保険としてここでも1回だけ保証。
+        val r = if (reset.isEmpty()) "" else reset
         scope.launch {
             try {
-                QuotaStore.save(context, if (reset.isEmpty()) "" else reset, pct)
-                // reset は空でも常に送る。Watch 側は --:-- 扱いで描画する。
-                // KEY_RESET を省略すると Watch が前回値を保持してしまうため、
+                QuotaStore.save(context, r, pct)
+                // reset は空でも常に送る。省略すると Watch が前回値を保持してしまうため、
                 // 「reset 無し」状態を明示伝達するためにも必ず put する。
                 val request = PutDataMapRequest.create(DATA_PATH).apply {
-                    dataMap.putString(KEY_RESET, if (reset.isEmpty()) "" else reset)
+                    dataMap.putString(KEY_RESET, r)
                     dataMap.putInt(KEY_PCT, pct)
                     dataMap.putLong(KEY_TIMESTAMP, System.currentTimeMillis())
                 }.asPutDataRequest().setUrgent()
                 Wearable.getDataClient(context).putDataItem(request).await()
-                Log.d(TAG, "Pushed to Watch: reset=$reset pct=$pct silent=$silent")
+                Log.d(TAG, "Pushed to Watch: reset=$r pct=$pct silent=$silent")
                 DebugLog.append(context, TAG_WATCH_PUSHED, "✅ pct=${pct}%${if (silent) " [silent]" else ""}")
-                // silent はウォッチ要請由来。ユーザー操作のない自動更新なので Toast 抑制
+                // silent はウォッチ要請由来（ユーザー操作のない自動更新）なので Toast 抑制
                 if (!silent) {
-                    debugToast(context, "✅ ntfy→Watch送信\nreset=$reset pct=${pct}%")
+                    debugToast(context, "✅ ntfy→Watch送信\nreset=$r pct=${pct}%")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to push to Watch", e)

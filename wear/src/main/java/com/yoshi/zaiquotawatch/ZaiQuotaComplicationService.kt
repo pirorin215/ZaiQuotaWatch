@@ -33,10 +33,9 @@ import androidx.wear.watchface.complications.datasource.SuspendingComplicationDa
 class ZaiQuotaComplicationService : SuspendingComplicationDataSourceService() {
 
     override suspend fun onComplicationRequest(request: ComplicationRequest): ComplicationData? {
-        Log.d(TAG, "onComplicationRequest type=${request.complicationType}")
         val state = QuotaStore.gaugeState(this)
         val reset = QuotaStore.getReset(this)
-        Log.d(TAG, "state=$state reset='$reset'")
+        Log.d(TAG, "onComplicationRequest type=${request.complicationType} state=$state reset='$reset'")
 
         // 表示テキストは常にリセット時刻（枯渇時は＝解除時刻）。未設定時のみフォールバック。
         val resetText = resetDisplay(reset)
@@ -70,30 +69,20 @@ class ZaiQuotaComplicationService : SuspendingComplicationDataSourceService() {
         }
     }
 
-    override fun getPreviewData(type: ComplicationType): ComplicationData? = when (type) {
-        ComplicationType.SHORT_TEXT -> ShortTextComplicationData.Builder(
-            text = PlainComplicationText.Builder("1:19").build(),
-            contentDescription = PlainComplicationText.Builder("ZAI quota reset preview").build()
-        )
-            .setSmallImage(
-                SmallImage.Builder(
-                    Icon.createWithResource(this, R.drawable.ic_dot_blue),
-                    SmallImageType.ICON
-                ).build()
-            )
-            .build()
-        ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(
-            text = PlainComplicationText.Builder("1:19").build(),
-            contentDescription = PlainComplicationText.Builder("ZAI quota reset preview").build()
-        )
-            .setSmallImage(
-                SmallImage.Builder(
-                    Icon.createWithResource(this, R.drawable.ic_dot_blue),
-                    SmallImageType.ICON
-                ).build()
-            )
-            .build()
-        else -> null
+    override fun getPreviewData(type: ComplicationType): ComplicationData? {
+        val text = PlainComplicationText.Builder("1:19").build()
+        val desc = PlainComplicationText.Builder("ZAI quota reset preview").build()
+        val image = SmallImage.Builder(
+            Icon.createWithResource(this, R.drawable.ic_dot_blue),
+            SmallImageType.ICON
+        ).build()
+        return when (type) {
+            ComplicationType.SHORT_TEXT -> ShortTextComplicationData.Builder(text, desc)
+                .setSmallImage(image).build()
+            ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(text, desc)
+                .setSmallImage(image).build()
+            else -> null
+        }
     }
 
     /**

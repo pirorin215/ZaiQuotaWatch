@@ -311,12 +311,11 @@ class QuotaRefreshActivity : Activity() {
 
     /**
      * 接続済みノード（Phone）へ /trigger_refresh メッセージを送信。
-     * 送信結果（少なくとも1ノードへの送信成功）を [onResult] で UI に反映する。
+     * 全ノードの送信結果が揃ってから確定し、いずれか成功なら SENT・全失敗なら FAILED。
      * データ本体は別経路（DataLayer /zai_quota）で非同期到着する。
      */
     private fun sendRefreshTrigger(onResult: (TriggerResult) -> Unit) {
         val messageClient = Wearable.getMessageClient(this)
-        // 接続先ノード一覧は NodeClient から取得する
         Wearable.getNodeClient(this).connectedNodes.addOnCompleteListener { task ->
             if (!task.isSuccessful) {
                 Log.w(TAG, "connectedNodes failed", task.exception)
@@ -329,30 +328,22 @@ class QuotaRefreshActivity : Activity() {
                 onResult(TriggerResult.NO_NODES)
                 return@addOnCompleteListener
             }
-            // 各ノードへ送信し、いずれかが成功すれば SENT 扱い
-            var anySent = false
-            var settled = false
+            // 全ノード送信完了を待ってから SENT/FAILED を確定（レース回避）。
+            var pending = nodes.size
+            var success = false
+            val settle = {
+                if (--pending == 0) onResult(if (success) TriggerResult.SENT else TriggerResult.FAILED)
+            }
             nodes.forEach { node ->
                 messageClient.sendMessage(node.id, TRIGGER_PATH, ByteArray(0))
                     .addOnSuccessListener {
                         Log.d(TAG, "Trigger sent to ${node.displayName} (${node.id})")
-                        if (!settled) {
-                            settled = true
-                            anySent = true
-                            onResult(TriggerResult.SENT)
-                        }
+                        success = true
+                        settle()
                     }
                     .addOnFailureListener { e ->
                         Log.w(TAG, "Trigger failed for ${node.id}", e)
-                        // 全ノード失敗時のみ FAILED。簡易判定: 最後まで成功がなければ FAILED。
-                        // 並び順の都合で後続成功が上書きする可能性があるため、
-                        // ここでは失敗を即 FAILED にせず、短遅延で確定させる。
-                        handler.postDelayed({
-                            if (!settled) {
-                                settled = true
-                                onResult(if (anySent) TriggerResult.SENT else TriggerResult.FAILED)
-                            }
-                        }, 500L)
+                        settle()
                     }
             }
         }

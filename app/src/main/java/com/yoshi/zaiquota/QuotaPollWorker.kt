@@ -138,19 +138,10 @@ class QuotaPollWorker(
     /**
      * ntfy データトピックから since 以降のクォータ関連メッセージを取得。
      *
-     * ntfy の /json は long-poll 既定で、新着が来るまで接続を保持する。
-     * 本トピック（claude-code-notice215）は ZCode の通知等も流れる活況で、
-     * poll=1 + readTimeout で打ち切る Mac と同じ方式だと Phone 側は常に
-     * timeout まで接続を保持してしまう（新着が尽きないため）。
-     *
-     * そのため poll=1 を付けず、代わりに「指定件数読んだら即 disconnect」で
-     * 能動的に接続を切る方式をとる。クォータデータ（pct= 含む）だけが欲しいので、
-     * MAX_FETCH 件読むか pct= メッセージを必要数集めた時点で打ち切る。
-     *
-     * クエリ:
-     *   - since=<id>: 前回読破位置以降の既到着分を返す
-     *   - poll=1 無し: 新着を待たず、既到着分を返したら long-poll に入るが
-     *     Phone 側が即 disconnect するため実質「既到着分のスナップショット」取得
+     * ntfy /json は long-poll 既定だが、本トピックは ZCode 通知等も流れる活況で
+     * poll=1 + readTimeout の Mac 方式だと常に timeout まで保持してしまう。
+     * そのため poll=1 を付けず、MAX_FETCH 件読むかクォータメッセージを必要数集めたら
+     * 即 disconnect する方式（Mac の --max-time 相当）をとる。
      */
     private fun pollMessages(since: String): List<NtfyMessage> {
         val url = URL("${DATA_TOPIC_URL}/json?since=${since}")
@@ -158,28 +149,23 @@ class QuotaPollWorker(
             requestMethod = "GET"
             connectTimeout = 8_000
             // long-poll 待機に入る前の読み出しは即時なので短めで十分。
-            // ここへ来る時点で since 以降の既到着分はサーバ側で用意済み。
             readTimeout = 8_000
         }
         val messages = mutableListOf<NtfyMessage>()
         try {
-            val code = conn.responseCode
-            if (code !in 200..299) {
-                Log.w(TAG, "ntfy poll HTTP $code")
+            if (conn.responseCode !in 200..299) {
+                Log.w(TAG, "ntfy poll HTTP ${conn.responseCode}")
                 return emptyList()
             }
             BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8)).use { reader ->
                 var line = reader.readLine()
                 var quotaCount = 0
-                // MAX_FETCH 行読むか、クォータメッセージを必要数集めたら打ち切り
                 while (line != null && messages.size < MAX_FETCH) {
                     if (line.isNotBlank()) {
                         parseJsonLine(line)?.let { msg ->
                             messages.add(msg)
                             // クォータ系（pct= 含む）だけ数える。ZCode の通知等は無視。
-                            if (msg.message.contains("pct=")) {
-                                quotaCount++
-                            }
+                            if (msg.message.contains("pct=")) quotaCount++
                         }
                     }
                     // クォータメッセージを必要数集めたら即打ち切り（long-poll 回避）
@@ -188,31 +174,23 @@ class QuotaPollWorker(
                 }
             }
         } catch (e: java.net.SocketTimeoutException) {
-            // readTimeout 到達: 既到着分が多く、読み出し中に timeout したか、
-            // since が未来位置で long-poll 待機に入ったか。取得済み分をそのまま返す。
+            // 既到着分が多く読み出し中に timeout したか、since が未来位置で long-poll 待機に入ったか。
+            // 取得済み分をそのまま返す。
             Log.d(TAG, "poll timeout after ${messages.size} msgs")
         } finally {
-            // long-poll 中でも強制切断。ここが Mac の --max-time 相当。
             conn.disconnect()
         }
-        // 全 path 共通: 取得済み分を返す。try 末尾の return messages が実行された場合は
-        // 到達しないが、catch/finally を抜けた場合はここへ来る。
         return messages
     }
 
     /** ntfy の1行 JSON を NtfyMessage へ変換。event=message 以外は null。 */
-    private fun parseJsonLine(line: String): NtfyMessage? {
-        return try {
-            val obj = org.json.JSONObject(line)
-            if (obj.optString("event") != "message") return null
-            NtfyMessage(
-                id = obj.getString("id"),
-                message = obj.getString("message")
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse json line: ${line.take(80)}")
-            null
-        }
+    private fun parseJsonLine(line: String): NtfyMessage? = try {
+        val obj = org.json.JSONObject(line)
+        if (obj.optString("event") != "message") null
+        else NtfyMessage(id = obj.getString("id"), message = obj.getString("message"))
+    } catch (e: Exception) {
+        Log.w(TAG, "Failed to parse json line: ${line.take(80)}")
+        null
     }
 
     private data class NtfyMessage(val id: String, val message: String)
